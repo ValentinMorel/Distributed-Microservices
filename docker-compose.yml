@@ -1,0 +1,75 @@
+version: '3.5'
+
+services:
+  traefik:
+    image: "traefik:v3.1"
+    container_name: "traefik"
+    command:
+      - "--log.level=DEBUG"
+      - "--api.insecure=true"
+      - "--providers.docker=true"
+      - "--providers.docker.exposedbydefault=false"
+      - "--entryPoints.web.address=:80"
+    ports:
+      - "80:80"
+      - "8080:8080"
+    volumes:
+      - "/var/run/docker.sock:/var/run/docker.sock:ro"
+    networks: 
+      - infra
+  whoami:
+    image: "traefik/whoami"
+    container_name: "simple-service"
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.whoami.rule=Host(`whoami.localhost`)"
+      - "traefik.http.routers.whoami.entrypoints=web"
+
+    networks: 
+      - infra
+  consul-server-1:
+    container_name: "consul-server-1"
+    restart: always
+    image: consul:1.15.4
+    ports:
+      - "8500:8500"
+      - "8600:8600/udp"
+      - "8300:8300"
+      - "8301:8301"
+      - "8301:8301/udp"
+      - "8302:8302"
+      - "8302:8302/udp"
+    volumes:
+      - ./consul-config-1.json:/consul/config/consul-config.json
+      - consul-data-1:/consul/data
+    command: "agent -config-file=/consul/config/consul-config.json"
+    networks:
+      - infra
+
+  consul-server-2:
+    container_name: "consul-server-2"
+    restart: always
+    image: consul:1.15.4
+    ports:
+      - "8501:8500"
+      - "8601:8600/udp"
+      - "8303:8300"
+      - "8304:8301"
+      - "8304:8301/udp"
+      - "8305:8302"
+      - "8305:8302/udp"
+    volumes:
+      - ./consul-config-2.json:/consul/config/consul-config.json
+      - consul-data-2:/consul/data
+    command: "agent -config-file=/consul/config/consul-config.json"
+    networks:
+      - infra
+
+networks:
+  infra:
+    driver: overlay
+    external: true
+
+volumes:
+  consul-data-1:
+  consul-data-2:
