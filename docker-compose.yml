@@ -1,6 +1,7 @@
-version: '3.5'
+version: '3.9'
 
 services:
+
   traefik:
     image: "traefik:v3.1"
     container_name: "traefik"
@@ -17,6 +18,7 @@ services:
       - "/var/run/docker.sock:/var/run/docker.sock:ro"
     networks: 
       - infra
+
   whoami:
     image: "traefik/whoami"
     container_name: "simple-service"
@@ -24,9 +26,9 @@ services:
       - "traefik.enable=true"
       - "traefik.http.routers.whoami.rule=Host(`whoami.localhost`)"
       - "traefik.http.routers.whoami.entrypoints=web"
-
     networks: 
       - infra
+
   consul-server-1:
     container_name: "consul-server-1"
     restart: always
@@ -65,11 +67,77 @@ services:
     networks:
       - infra
 
-networks:
-  infra:
-    driver: overlay
-    external: true
+  mongo1:
+    image: mongo:4.4
+    container_name: mongo1
+    restart: always
+    hostname: mongo1
+    ports:
+      - 27017:27017
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: root
+      MONGO_INITDB_ROOT_PASSWORD: example
+    command: mongod --replSet rs0 --keyFile /data/configdb/mongodb-keyfile --bind_ip_all
+    volumes:
+      - ./mongodb-keyfile:/data/configdb/mongodb-keyfile:ro
+      - mongo1_data:/data/db
+    networks:
+      - infra
+
+  mongo2:
+    image: mongo:4.4
+    container_name: mongo2
+    restart: always
+    hostname: mongo2
+    ports:
+      - 27018:27017
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: root
+      MONGO_INITDB_ROOT_PASSWORD: example
+    command: mongod --replSet rs0 --keyFile /data/configdb/mongodb-keyfile --bind_ip_all
+    volumes:
+      - ./mongodb-keyfile:/data/configdb/mongodb-keyfile:ro
+      - mongo2_data:/data/db
+    networks:
+      - infra
+
+
+  init-replica:
+    image: mongo:4.4
+    container_name: init-replica
+    depends_on:
+      - mongo1
+      - mongo2
+    networks:
+      - infra
+    entrypoint: >
+      bash -c "
+      echo 'Waiting for MongoDB containers to start...' &&
+      until mongo --host mongo1:27017 -u root -p example --authenticationDatabase admin --eval 'db.runCommand({ ping: 1 })'; do
+        echo 'Mongo1 is unavailable - sleeping'
+        sleep 5
+      done &&
+      echo 'Mongo1 is up - initiating replica set...' &&
+      mongo --host mongo1:27017 -u root -p example --authenticationDatabase admin --eval '
+        rs.initiate({
+          _id: \"rs0\",
+          members: [
+            { _id: 0, host: \"mongo1:27017\" },
+            { _id: 1, host: \"mongo2:27017\", arbiterOnly: true},
+          ]
+        })
+      ' &&
+      echo 'Replica set initiated successfully!'
+      "
+    restart: "no"
 
 volumes:
   consul-data-1:
   consul-data-2:
+  mongo1_data:
+  mongo2_data:
+
+networks:
+  infra:
+    driver: overlay
+    external: true
